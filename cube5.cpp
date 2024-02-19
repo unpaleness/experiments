@@ -87,9 +87,9 @@ namespace {
                         if (!patternPermOpt->count(item)) {
                             bIsOk = false;
                         }
-                        if (bIsOk) {
-                            return true;
-                        }
+                    }
+                    if (bIsOk) {
+                        return true;
                     }
                 }
             }
@@ -97,6 +97,7 @@ namespace {
         return false;
     }
     bool solve(Tiles& cube, Groups& groups, const uint32_t i) {
+        std::cout << "solve: " << i << '\n';
         if (i >= N * N * N) {
             for (const auto& group : groups) {
                 if (group.size() < GROUP_SIZE) {
