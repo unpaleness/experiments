@@ -7,13 +7,16 @@
 namespace {
     typedef std::vector<int32_t> Vector;
     constexpr int32_t UNDEFINED = -1;
+    int32_t DEEPEST_ITERATION = -1;
+    int64_t PROBES_TRIED = 0;
     int32_t N;
     int32_t GROUPS_AMOUNT;
     std::vector<Vector> PATTERN;
     Vector CUBE;
+    std::vector<Vector> GROUPS;
     bool readConfig() {
         int32_t buf;
-        int32_t i = 0;
+        int32_t bufferIndex = 0;
         int32_t x = 0;
         int32_t y = 0;
         int32_t z = 0;
@@ -23,16 +26,16 @@ namespace {
                 std::cerr << "Invalid input (value below zero)\n";
                 return false;
             }
-            if (i == 0) {
+            if (bufferIndex == 0) {
                 if (buf == 0) {
                     std::cerr << "Invalid input (N value is zero)\n";
                     return false;
                 }
                 N = buf;
-            } else if (i == 1) {
+            } else if (bufferIndex == 1) {
                 GROUPS_AMOUNT = buf;
             } else {
-                switch ((i - 2) % 3) {
+                switch ((bufferIndex - 2) % 3) {
                     case 0:
                         x = buf;
                         bCompletePatternCoordinate = false;
@@ -47,15 +50,19 @@ namespace {
                         break;
                 }
             }
-            ++i;
+            ++bufferIndex;
         }
         if (!bCompletePatternCoordinate) {
             std::cerr << "Invalid input (empty or incomplete pattern coordinates)\n";
             return false;
         }
         CUBE = Vector(N * N * N);
-        for (i = 0; i < N * N * N; ++i) {
+        for (int32_t i = 0; i < N * N * N; ++i) {
             CUBE[i] = UNDEFINED;
+        }
+        GROUPS.reserve(GROUPS_AMOUNT);
+        for (int32_t i = 0; i < GROUPS_AMOUNT; ++i) {
+            GROUPS.emplace_back(Vector(PATTERN.size()));
         }
 
         return true;
@@ -68,11 +75,9 @@ namespace {
         return x >= 0 && x < N && y >= 0 && y < N && z >= 0 && z < N;
     }
     // There're total of 48 permutations: 3! * 2^3 (6 permutations of coordinates times 8 variations of each coord sign)
-    std::optional<Vector> tryGetPatternPermutation(int32_t permutationIndex, int32_t positionInPattern, int32_t positionInCube)
+    bool tryGetPatternPermutation(int32_t permutationIndex, int32_t positionInPattern, int32_t positionInCube, uint32_t groupId /*used for buffer*/)
     {
         // std::cout << std::format("tryGetPatternPermutation: permutationIndex: {}, positionInPattern: {}, positionInCube: {}", permutationIndex, positionInPattern, positionInCube) << std::endl;
-        Vector result;
-        result.reserve(PATTERN.size());
         permutationIndex = permutationIndex % 48;
         const int32_t coordVariation = permutationIndex / 6;
         // coordinate permutation
@@ -97,11 +102,11 @@ namespace {
             // std::cout << std::format("tryGetPatternPermutation: positionInGroup: {}, ({}, {}, {}), indexInCube: {}", i, x, y, z, indexInCube) << std::endl;
             if (!isInBounds(x, y, z) || CUBE[indexInCube] != UNDEFINED) {
                 // std::cout << std::format("tryGetPatternPermutation: permutationIndex: {} - bad, return", permutationIndex) << std::endl;
-                return std::nullopt;
+                return false;
             }
-            result.push_back(indexInCube);
+            GROUPS[groupId][i] = indexInCube;
         }
-        return result;
+        return true;
     }
     void printPermutation(const Vector& permutation, const int32_t occurences) {
         if (permutation.empty()) {
@@ -118,17 +123,16 @@ namespace {
         std::vector<int32_t> occurencesList;
         for (uint32_t i = 0; i < 48; ++i) {
             // std::cout << std::format("testPermutationsUniqueness: i: {}", i) << std::endl;
-            auto permutationOpt = tryGetPatternPermutation(i, 0, 0);
-            if (!permutationOpt) {
+            if (!tryGetPatternPermutation(i, 0, 0, 0)) {
                 // std::cout << std::format("testPermutationsUniqueness: i: {}, invalid permutation", i) << std::endl;
                 continue;
             }
-            auto permutation = *permutationOpt;
-            std::sort(permutation.begin(), permutation.end());
+            auto& group = GROUPS[0];
+            std::sort(group.begin(), group.end());
             bool bIsUnique = true;
             for (uint32_t j = 0; j < permutations.size(); ++j) {
                 // std::cout << std::format("testPermutationsUniqueness: i: {}, j: {}", i, j) << std::endl;
-                if (std::equal(permutation.begin(), permutation.end(), permutations[j].begin())) {
+                if (std::equal(group.begin(), group.end(), permutations[j].begin())) {
                     // std::cout << std::format("testPermutationsUniqueness: not unique: i: {}", i) << std::endl;
                     ++occurencesList[j];
                     bIsUnique = false;
@@ -137,7 +141,7 @@ namespace {
             }
             if (bIsUnique) {
                 // std::cout << std::format("testPermutationsUniqueness: unique: i: {}", i) << std::endl;
-                permutations.emplace_back(std::move(permutation));
+                permutations.push_back(group);
                 occurencesList.push_back(1);
             }
         }
@@ -158,6 +162,10 @@ namespace {
         }
     }
     bool tryPlaceGroup(const int32_t groupId) {
+        if (groupId > DEEPEST_ITERATION) {
+            DEEPEST_ITERATION = groupId;
+            std::cout << std::format("tryPlaceGroup: deepest iteration so far: {}, probes: {}", DEEPEST_ITERATION, PROBES_TRIED) << std::endl;
+        }
         // std::cout << "tryPlaceGroup: groupId: " << groupId << '\n';
         if (groupId >= GROUPS_AMOUNT) {
             return true;
@@ -170,14 +178,15 @@ namespace {
             {
                 for (uint32_t posInPattern = 0; posInPattern < PATTERN.size(); ++posInPattern)
                 {
-                    if (const auto patternPermOpt = tryGetPatternPermutation(permIndex, posInPattern, posInCube); patternPermOpt) {
-                        for (const auto posInCubeOfGroup : *patternPermOpt) {
+                    if (tryGetPatternPermutation(permIndex, posInPattern, posInCube, groupId)) {
+                        ++PROBES_TRIED;
+                        for (const auto posInCubeOfGroup : GROUPS[groupId]) {
                             CUBE[posInCubeOfGroup] = groupId;
                         }
                         if (tryPlaceGroup(groupId + 1)) {
                             return true;
                         }
-                        for (const auto posInCubeOfGroup : *patternPermOpt) {
+                        for (const auto posInCubeOfGroup : GROUPS[groupId]) {
                             CUBE[posInCubeOfGroup] = UNDEFINED;
                         }
                     }
